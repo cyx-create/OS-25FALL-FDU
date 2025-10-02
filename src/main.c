@@ -11,23 +11,16 @@ void main() {
     if (cpuid() == 0) {
         /* @todo: Clear BSS section.*/
         extern char edata[], end[];
-<<<<<<< HEAD
         memset(edata, 0, (usize)(end - edata));
-=======
-        memset(edata, 0, end - edata);
->>>>>>> lab0-dev
 
         smp_init();
         uart_init();
         printk_init();
 
-<<<<<<< HEAD
         /* initialize kernel memory allocator */
         kinit();
-=======
         /* @todo: Print "Hello, world! (Core 0)" */
-        printk("Hello, world! (Core 0)\n");
->>>>>>> lab0-dev
+        //printk("Hello, world! (Core 0)\n");
 
         arch_fence();
 
@@ -36,12 +29,9 @@ void main() {
     } else {
         while (!boot_secondary_cpus);
         arch_fence();
-<<<<<<< HEAD
-=======
 
         /* @todo: Print "Hello, world! (Core <core id>)" */
-        printk("Hello, world! (Core %lld)\n", cpuid());
->>>>>>> lab0-dev
+        //printk("Hello, world! (Core %lld)\n", cpuid());
     }
 
     set_return_addr(idle_entry);
