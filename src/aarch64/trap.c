@@ -13,6 +13,7 @@ void trap_global_handler(UserContext *context)
     u64 ec = esr >> ESR_EC_SHIFT;
     u64 iss = esr & ESR_ISS_MASK;
     u64 ir = esr & ESR_IR_MASK;
+    // printk("trap: ESR=0x%llx,ELR=0x%llx\n",esr, context->elr);
 
     (void)iss;
 
@@ -20,8 +21,9 @@ void trap_global_handler(UserContext *context)
 
     switch (ec) {
     case ESR_EC_UNKNOWN: {
-        if (ir)
-            PANIC();
+        if (ir){
+            // printk("trap PANIC: thisproc=%p, ELR=0x%llx, ESR=0x%llx\n", thisproc(), context->elr, esr);
+            PANIC();}
         else
             interrupt_global_handler();
     } break;

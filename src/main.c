@@ -53,14 +53,8 @@ void main()
         while (!boot_secondary_cpus)
             ;
         arch_fence();
-<<<<<<< HEAD
         timer_init_percpu();
         gicv3_init_percpu();
-=======
-
-        /* @todo: Print "Hello, world! (Core <core id>)" */
-        //printk("Hello, world! (Core %lld)\n", cpuid());
->>>>>>> lab1-dev
     }
 
     set_return_addr(idle_entry);
