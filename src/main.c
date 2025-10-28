@@ -33,6 +33,8 @@ void main()
 
         /* initialize kernel memory allocator */
         kinit();
+        /* @todo: Print "Hello, world! (Core 0)" */
+        //printk("Hello, world! (Core 0)\n");
 
         /* initialize sched */
         init_sched();
