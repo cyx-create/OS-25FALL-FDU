@@ -16,6 +16,38 @@ extern void swtch(KernelContext *new_ctx, KernelContext **old_ctx);
 static SpinLock rqlock;
 static ListNode rq;
 
+// //lab3尝试1
+// static void update_this_state(enum procstate new_state);
+// // ---------------- CPU 定时器回调 ----------------
+// void timer_handler(struct timer *t) {
+//     Proc *p = (Proc *)t->data;
+//     if (p && p->state == RUNNING) {
+//         acquire_sched_lock();
+//         update_this_state(RUNNABLE); // 抢占当前进程
+//         sched(RUNNABLE);
+//         release_sched_lock();
+//     }
+// }
+
+
+// //lab3尝试2
+static struct timer CPU_timer[NCPU];
+
+void timer_handler(struct timer* timer){
+
+    if (!timer) return;
+
+    Proc *cur = thisproc();
+    if (!cur || cur->idle) {
+        return; // idle 进程不抢占
+    }
+
+    timer->data = 0;
+    acquire_sched_lock();
+    sched(RUNNABLE);
+    // release_sched_lock();
+}
+
 
 
 void init_sched()
@@ -26,16 +58,25 @@ void init_sched()
     init_spinlock(&rqlock);
     init_list_node(&rq);
 
+    //lab3尝试2
+    for(int i = 0; i < NCPU; i++){
+        CPU_timer[i].triggered = 1;
+        CPU_timer[i].elapse = 10;
+        CPU_timer[i].handler = &timer_handler;
+        CPU_timer[i].data = i;
+    }
+
     for(int i=0 ; i<NCPU ; i++)
     {
         struct Proc* p = kalloc(sizeof(struct Proc));
-        //memset(p, 0, sizeof(struct Proc));  // 清零
+        //memset(p, 0, sizeof(struct Proc)); 
         p->idle = 1;
         p->state = RUNNING;
-        //p->pid = -1; 
-        //init_schinfo(&p->schinfo); //在proc的init里面
         cpus[i].sched.thisproc = cpus[i].sched.idle = p;
     }
+
+    //lab3尝试1
+    // init_clock_handler();
 }
 
 //没问题
@@ -118,8 +159,6 @@ static void update_this_state(enum procstate new_state)
     // update the state of current process to new_state, and modify the sched queue if necessary
     // thisproc()->state = new_state;
 
-    //尝试2
-    // thisproc()->state = new_state;
     Proc *this = thisproc();
     
     // 获取当前CPU的idle进程
@@ -133,21 +172,20 @@ static void update_this_state(enum procstate new_state)
     // 更新状态
     this->state = new_state;
     
-    // 如果不是idle进程，且新状态是RUNNABLE或RUNNING，加入运行队列
+    // 如果不是idle进程，且新状态是RUNNABLE或RUNNING，加入运行队列的尾部！！！
     if (this != idle_proc && (new_state == RUNNABLE || new_state == RUNNING)) {
-        _insert_into_list(&rq, &this->schinfo.rq);
+        _insert_into_list(rq.prev, &this->schinfo.rq);
     }
 
-    //尝试1 暂时靠谱版
-    // thisproc()->state = new_state; // 修改当前运行进程的状态
-    
-    // if(new_state == ZOMBIE || new_state == SLEEPING) {
-    //     // 从就绪队列中移除
-    //     _detach_from_list(&thisproc()->schinfo.rq);
+    //lab3尝试1
+    // 设置定时器，非 idle 且 RUNNABLE/RUNNING 才设置
+    // if(this != idle_proc && this->state == RUNNING) {
+    //     static struct timer t;
+    //     t.elapse =5; // 时间片，单位可根据实验要求修改
+    //     t.handler = &cpu_preempt_handler;
+    //     t.data = (u64)this;
+    //     set_cpu_timer(&t);
     // }
-
-
-
 }
 
 extern bool panic_flag;
@@ -162,8 +200,7 @@ static Proc *pick_next()
     }
     _for_in_list(p, &rq)
     {
-        if(p == &rq)
-        continue;
+        if(p == &rq) continue;
         auto proc = container_of(p, struct Proc, schinfo.rq);
         if(proc->state == RUNNABLE)
         {
@@ -173,6 +210,7 @@ static Proc *pick_next()
     return cpus[cpuid()].sched.idle;
 }
 
+
 //没问题
 static void update_this_proc(Proc *p)
 {
@@ -180,6 +218,13 @@ static void update_this_proc(Proc *p)
     // update thisproc to the choosen process
     //reset_clock(1000);
     cpus[cpuid()].sched.thisproc = p; 
+
+    // lab3 尝试2
+    if(!CPU_timer[cpuid()].triggered){
+        cancel_cpu_timer(&CPU_timer[cpuid()]);
+    }
+
+    set_cpu_timer(&CPU_timer[cpuid()]);
 }
 
 // A simple scheduler.
@@ -189,6 +234,12 @@ void sched(enum procstate new_state)
 {
     auto this = thisproc();
     ASSERT(this->state == RUNNING);
+    //lab3新加
+    if(this->killed && new_state != ZOMBIE){
+        release_sched_lock();
+        return;
+    }
+
     update_this_state(new_state);
     auto next = pick_next();
     update_this_proc(next);

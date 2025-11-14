@@ -11,7 +11,6 @@ Proc root_proc;
 void kernel_entry();
 void proc_entry();
 
-//尝试3没用 static int pid = 0;
 static SpinLock plock = {0};
 
 typedef struct {
@@ -71,34 +70,12 @@ void init_kproc()
     // 1. init global resources (e.g. locks, semaphores)
     // 2. init the root_proc (finished)
     init_spinlock(&plock);
-    //尝试3
     init_pidmanager(&pmanager);
-    //
     init_proc(&root_proc);
     root_proc.parent = &root_proc;
     start_proc(&root_proc, kernel_entry, 123456);
 
 }
-
-
-
-//暂时靠谱的尝试2
-// static ListNode pidpool = {&pidpool, &pidpool};
-
-// int alloc_pid() {
-//     acquire_spinlock(&plock);
-//     int id;
-//     if (!_empty_list(&pidpool)) {
-//         PidNode *pn = container_of(pidpool.next, PidNode, lnode);
-//         id = pn->id;
-//         _detach_from_list(&pn->lnode);
-//         kfree(pn);
-//     } else {
-//         id = ++pid;
-//     }
-//     release_spinlock(&plock);
-//     return id;
-// }
 
 void init_proc(Proc *p)
 {
@@ -120,24 +97,19 @@ void init_proc(Proc *p)
 
     // 初始化调度信息
     init_schinfo(&p->schinfo);
+    init_pgdir(&p->pgdir);
 
-    // 尝试3
     p->killed = false;
     p->idle = false;
     p->parent = NULL;
     p->state = UNUSED;
     p->exitcode = 0;
-    // 
 
     // 设置上下文指针
     p->kcontext = (KernelContext *)((u64)p->kstack + PAGE_SIZE - 16 - sizeof(KernelContext) - sizeof(UserContext));
     p->ucontext = (UserContext *)((u64)p->kstack + PAGE_SIZE - 16 - sizeof(UserContext));
 
-    //分配pid要加锁，暂时靠谱的尝试2
-    // p->pid = alloc_pid();
-    // 尝试3
     p->pid = pid_get(&pmanager);
-    // 
     release_spinlock(&plock);
 }
 
@@ -187,11 +159,6 @@ int start_proc(Proc *p, void (*entry)(u64), u64 arg)
     return id;  
 }
 
-
-
-
-
-
 int wait(int *exitcode)
 {
     // TODO:
@@ -200,80 +167,6 @@ int wait(int *exitcode)
     // 3. if any child exits, clean it up and return its pid and exitcode
     // NOTE: be careful of concurrency
     Proc *this = thisproc();
-    // (void)exitcode;
-    // return 0;
-    
-    //尝试1
-    // acquire_spinlock(&plock);
-    // if (_empty_list(&this->children)) {
-    //     release_spinlock(&plock);
-    //     return -1;
-    // }
-    // release_spinlock(&plock);
-
-    // // 2. wait for childexit
-    // if (!wait_sem(&this->childexit)) {
-    //     // printk("wait_sem failed\n");
-    //     return -1;
-    // }
-
-    // // 3. if any child exits, clean it up and return its pid and exitcode
-    // int id = -1;
-    // acquire_spinlock(&plock);
-    // acquire_sched_lock();
-    // for_list(this->children) {
-    //     Proc *childproc = container_of(p, Proc, ptnode);
-    //     if (childproc->state == ZOMBIE) {
-    //         id = destroy_proc(childproc, exitcode);
-    //         break;
-    //     }
-    // }
-    // release_sched_lock();
-    // release_spinlock(&plock);
-    // return id;
-
-
-    //尝试2
-    // int child_pid = -1;
-    // // printk("[WAIT] pid=%d start wait\n", this->pid);
-
-    // acquire_spinlock(&plock);
-    // if (_empty_list(&this->children)) {
-    //     release_spinlock(&plock);
-    //     return -1; // no children
-    // }
-    // release_spinlock(&plock);
-
-    // // wait until any child exits
-    // wait_sem(&this->childexit);
-
-    // // find a ZOMBIE child
-    // acquire_spinlock(&plock);
-    // for_list(this->children) {
-    //     Proc *child = container_of(p, Proc, ptnode);
-    //     if (child->state == ZOMBIE) {
-    //         child_pid = child->pid;
-    //         if (exitcode)
-    //             *exitcode = child->exitcode;
-
-    //         // remove child from parent's list and free pid
-    //         _detach_from_list(&child->ptnode);
-    //         PidNode *pidn = kalloc(sizeof(PidNode));
-    //         pidn->id = child->pid;
-    //         _insert_into_list(&pidpool, &pidn->lnode);
-
-    //         //kfree(child->kstack);//old
-    //         kfree_page(child->kstack);//new
-    //         kfree(child);
-
-    //         break;
-    //     }
-    // }
-    // release_spinlock(&plock);
-
-    // return child_pid;
-
-    //尝试3
     acquire_spinlock(&plock);
     if(this->children.next == &this->children){
         release_spinlock(&plock);
@@ -332,48 +225,6 @@ NO_RETURN void exit(int code)
     // 3. transfer children to the root_proc, and notify the root_proc if there is zombie
     // 4. sched(ZOMBIE)
     // NOTE: be careful of concurrency
-
-    // 暂时靠谱的尝试2
-    // Proc *this = thisproc();
-    // this->exitcode = code;
-    // // printk("[EXIT] pid=%d entering exit, code=%d, parent=%d\n", this->pid, code, this->parent ? this->parent->pid : -1);
-
-    // acquire_spinlock(&plock);
-
-    // // transfer children to root_proc
-    // while (!_empty_list(&this->children)) {
-    //     ListNode *node = this->children.next;
-    //     Proc *child = container_of(node, Proc, ptnode);
-    //     _detach_from_list(&child->ptnode);
-
-    //     child->parent = &root_proc;
-    //     _insert_into_list(&root_proc.children, &child->ptnode);
-
-    //     // if child is already ZOMBIE, wake up root_proc
-    //     if (child->state == ZOMBIE) {
-    //         post_sem(&root_proc.childexit);
-    //     }
-    // }
-
-    // // mark this process as ZOMBIE
-    // //this->state = ZOMBIE;
-
-    // // notify parent
-    // if (this->parent) {
-    //     // printk("[EXIT] pid=%d posting parent->childexit\n", this->pid);
-    //     post_sem(&this->parent->childexit);
-    //     // printk("[EXIT] pid=%d finished post_sem, semval=%d\n", this->pid, this->parent->childexit.val);
-    // }
-
-    // release_spinlock(&plock);
-    // // schedule another process
-    // acquire_sched_lock();
-    // sched(ZOMBIE);
-
-    // // should never reach here
-    // PANIC();// prevent the warning of 'no_return function returns'
-
-    // 尝试3
     auto this = thisproc();
     this->exitcode = code;
 
@@ -401,6 +252,7 @@ NO_RETURN void exit(int code)
         }
         acquire_sched_lock();
     }
+    free_pgdir(&this->pgdir);
 
     release_sched_lock();
 
@@ -418,4 +270,36 @@ int kill(int pid)
     // TODO:
     // Set the killed flag of the proc to true and return 0.
     // Return -1 if the pid is invalid (proc not found).
+    //尝试1，不确定
+    int ret = -1;  // 默认找不到
+
+    acquire_spinlock(&plock); // 锁住整个进程树
+
+    Proc *stack[128];          // 用于模拟递归
+    int top = 0;
+    stack[top++] = &root_proc;
+
+    while (top > 0) {
+        Proc *current = stack[--top];
+
+        // 如果找到目标进程且不是 UNUSED
+        if (current->pid == pid && !is_unused(current)) {
+            current->killed = 1;    // 设置 killed 标记
+            activate_proc(current);    // 唤醒进程
+            ret = 0;                // 标记成功
+            break;                  // 找到就结束
+        }
+
+        // 将子进程加入 stack
+        _for_in_list(p, &current->children) {
+            if (p == &current->children) continue;
+            Proc *child = container_of(p, Proc, ptnode);
+            stack[top++] = child;
+        }
+    }
+
+    release_spinlock(&plock);
+
+    return ret;
 }
+
