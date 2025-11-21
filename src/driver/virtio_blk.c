@@ -115,6 +115,9 @@ int virtio_blk_rw(Buf *b)
     arch_fence();
 
     /* LAB 4 TODO 1 BEGIN */
+    release_spinlock(&disk.lk);
+    wait_sem(&b->sem);        
+    acquire_spinlock(&disk.lk);
     
     /* LAB 4 TODO 1 END */
 
@@ -139,7 +142,15 @@ static void virtio_blk_intr()
         }
 
         /* LAB 4 TODO 2 BEGIN */
-    
+        /*
+         * 中断到来，使用 info 中保存的 buf 指针找到对应的 Buf 结构，
+         * 标记完成并唤醒等待该缓冲区的任务（通过信号量）。
+         */
+        Buf *b = (Buf*)((void*)disk.virtq.info[d0].buf - offset_of(Buf, data));
+        if (b) {
+            disk.virtq.info[d0].done = 1;
+            post_sem(&b->sem);    /* 唤醒 virtio_blk_rw 中等待的 sem_down */
+        }
         /* LAB 4 TODO 2 END */
 
         disk.virtq.info[d0].buf = NULL;
