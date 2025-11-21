@@ -18,6 +18,7 @@ static Semaphore s1, s2, s3, s4, s5, s6;
 
 static void proc_test_1b(u64 a)
 {
+    // printk("[PT1B] pid=%d start, arg=%lld\n", thisproc()->pid, a);//debug
     switch (a / 10 - 1) {
     case 0:
         break;
@@ -44,10 +45,12 @@ static void proc_test_1b(u64 a)
         post_sem(&s4);
         break;
     case 9:
+        // printk("[PT1B] PID=%d before post_sem(s5), s5.val=%d\n", thisproc()->pid, s5.val);
         post_sem(&s5);
         unalertable_wait_sem(&s6);
         break;
     }
+    // printk("[PT1B] pid=%d before exit(%lld)\n", thisproc()->pid, a);//debug
     exit(a);
 }
 
@@ -129,6 +132,7 @@ static void proc_test_1()
     for (int i = 0; i < 10; i++) {
         int code, id;
         id = wait(&code);
+        // printk("[PT1] wait returned id=%d, code=%d\n", id, code);
         ASSERT(pid[code] == id);
         printk("proc %d exit\n", code);
     }
