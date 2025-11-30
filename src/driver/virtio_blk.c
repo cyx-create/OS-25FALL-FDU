@@ -116,7 +116,9 @@ int virtio_blk_rw(Buf *b)
 
     /* LAB 4 TODO 1 BEGIN */
     release_spinlock(&disk.lk);
-    wait_sem(&b->sem);        
+    if (!wait_sem(&b->sem)) {
+        return false;   // 或者返回你的函数所需要的失败值
+    }       
     acquire_spinlock(&disk.lk);
     
     /* LAB 4 TODO 1 END */

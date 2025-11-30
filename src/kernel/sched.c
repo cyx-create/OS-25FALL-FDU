@@ -131,6 +131,34 @@ bool _activate_proc(Proc *p, bool onalert)
     // if the proc->state is RUNNING/RUNNABLE, do nothing and return false
     // if the proc->state is SLEEPING/UNUSED, set the process state to RUNNABLE, add it to the sched queue, and return true
     // if the proc->state is DEEPSLEEPING, do nothing if onalert or activate it if else, and return the corresponding value.
+    acquire_sched_lock();
+
+    // Case 1: 状态不应被激活 → 返回 false
+    // RUNNING、RUNNABLE、ZOMBIE 不需要被唤醒
+    if(p->state == RUNNING || p->state == RUNNABLE || p->state == ZOMBIE){
+        release_sched_lock();
+        return false;
+    }
+
+    // Case 2: 可被正常唤醒：SLEEPING、UNUSED
+    if(p->state == SLEEPING || p->state == UNUSED ){
+        p->state = RUNNABLE;
+        _insert_into_list(&rq, &p->schinfo.rq);
+    }
+
+    // Case 3: DEEPSLEEPING + onalert = true → 忽略 alert，返回 false
+    if (p->state == DEEPSLEEPING && onalert) {
+        release_sched_lock();
+        return false;
+    }
+
+    // Case 4
+    if (p->state == DEEPSLEEPING && !onalert) {
+        p->state = RUNNABLE;
+        _insert_into_list(&rq, &p->schinfo.rq);
+    }
+    release_sched_lock();
+    return true;
 }
 
 //改过了

@@ -285,7 +285,7 @@ int kill(int pid)
         // 如果找到目标进程且不是 UNUSED
         if (current->pid == pid && !is_unused(current)) {
             current->killed = 1;    // 设置 killed 标记
-            activate_proc(current);    // 唤醒进程
+            alert_proc(current);    // 唤醒进程
             ret = 0;                // 标记成功
             break;                  // 找到就结束
         }
