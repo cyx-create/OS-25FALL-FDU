@@ -17,6 +17,7 @@ void trap_global_handler(UserContext *context)
     u64 ec = esr >> ESR_EC_SHIFT;
     u64 iss = esr & ESR_ISS_MASK;
     u64 ir = esr & ESR_IR_MASK;
+    // printk("trap: ESR=0x%llx,ELR=0x%llx\n",esr, context->elr);
 
     arch_reset_esr();
 
