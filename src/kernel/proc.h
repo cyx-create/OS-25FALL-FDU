@@ -55,7 +55,4 @@ int start_proc(Proc *, void (*entry)(u64), u64 arg);
 NO_RETURN void exit(int code);
 WARN_RESULT int wait(int *exitcode);
 WARN_RESULT int kill(int pid);
-<<<<<<< HEAD
 WARN_RESULT int fork();
-=======
->>>>>>> lab6-dev
