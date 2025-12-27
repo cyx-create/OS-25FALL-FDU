@@ -32,13 +32,8 @@ NO_RETURN void kernel_entry()
     printk("Hello world! (Core %lld)\n", cpuid());
     proc_test();
     // vm_test();
-<<<<<<< HEAD
     // user_proc_test();
     // io_test();
-=======
-    user_proc_test();
-    io_test();
->>>>>>> lab6-dev
 
     /* LAB 4 TODO 3 BEGIN */
     Buf b;
