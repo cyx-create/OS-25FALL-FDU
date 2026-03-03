@@ -13,6 +13,7 @@
 
 struct section {
     u64 flags;
+    int mmap_flags;
     u64 begin;
     u64 end;
     ListNode stnode;

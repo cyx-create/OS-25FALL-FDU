@@ -10,6 +10,7 @@
 
 // maximum number of open files in the whole system.
 #define NFILE 65536  
+#define NOFILE 16
 
 typedef struct file {
     // type of the file.
@@ -33,10 +34,15 @@ struct ftable {
     // TODO: table of file objects in the system
 
     // Note: you may need a lock to prevent concurrent access to the table!
+
+    SpinLock flock;
+    File flist[NFILE];
 };
 
 struct oftable {
     // TODO: table of opened file descriptors in a process
+
+    File* ofile[NOFILE];
 };
 
 // initialize the global file table.

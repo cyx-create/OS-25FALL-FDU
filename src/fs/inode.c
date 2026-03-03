@@ -2,7 +2,9 @@
 #include <fs/inode.h>
 #include <kernel/mem.h>
 #include <kernel/printk.h>
-
+#include <kernel/sched.h>
+#include <sys/stat.h>
+#include <kernel/console.h>
 /**
     @brief the private reference to the super block.
 
@@ -63,10 +65,63 @@ void init_inodes(const SuperBlock* _sblock, const BlockCache* _cache) {
     sblock = _sblock;
     cache = _cache;
 
-    if (ROOT_INODE_NO < sblock->num_inodes)
+    // // ================ 超级块信息输出 ================
+    // printk("[INODE DEBUG] =========================================\n");
+    // printk("[INODE DEBUG] SuperBlock Information:\n");
+    // printk("[INODE DEBUG]   SuperBlock address: 0x%p\n", sblock);
+    // printk("[INODE DEBUG]   num_blocks:         %u\n", sblock->num_blocks);
+    // printk("[INODE DEBUG]   num_data_blocks:    %u\n", sblock->num_data_blocks);
+    // printk("[INODE DEBUG]   num_inodes:         %u\n", sblock->num_inodes);
+    // printk("[INODE DEBUG]   num_log_blocks:     %u\n", sblock->num_log_blocks);
+    // printk("[INODE DEBUG]   log_start:          %u\n", sblock->log_start);
+    // printk("[INODE DEBUG]   inode_start:        %u\n", sblock->inode_start);
+    // printk("[INODE DEBUG]   bitmap_start:       %u\n", sblock->bitmap_start);
+    // printk("[INODE DEBUG] =========================================\n");
+
+    // // ================ 分区信息输出 ================
+    // printk("[INODE DEBUG] =========================================\n");
+    // printk("[INODE DEBUG] Partition Information:\n");
+    
+    // // 第一个分区信息（从注释中获取）
+    // printk("[INODE DEBUG] First partition (likely kernel area):\n");
+    // printk("[INODE DEBUG]   Special block:       2048\n");
+    // printk("[INODE DEBUG]   num_blocks:          1838176491 (likely garbage)\n");
+    // printk("[INODE DEBUG]   num_data_blocks:     779314795\n");
+    // printk("[INODE DEBUG]   num_inodes:          7627110\n");
+    // printk("[INODE DEBUG]   num_log_blocks:      2097410\n");
+    // printk("[INODE DEBUG]   log_start:           2\n");
+    // printk("[INODE DEBUG]   inode_start:         63488\n");
+    // printk("[INODE DEBUG]   bitmap_start:        524320\n");
+    
+    // // 第二个分区信息（实际的ext2文件系统）
+    // printk("[INODE DEBUG] -----------------------------------------\n");
+    // printk("[INODE DEBUG] Second partition (ext2 filesystem):\n");
+    // printk("[INODE DEBUG]   Start block:         133120 (65MB offset)\n");
+    // printk("[INODE DEBUG]   Super block:         133121\n");
+    // printk("[INODE DEBUG]   num_blocks:          1000\n");
+    // printk("[INODE DEBUG]   num_data_blocks:     908\n");
+    // printk("[INODE DEBUG]   num_inodes:          200\n");
+    // printk("[INODE DEBUG]   num_log_blocks:      63\n");
+    // printk("[INODE DEBUG]   log_start:           2\n");
+    // printk("[INODE DEBUG]   inode_start:         65\n");
+    // printk("[INODE DEBUG]   bitmap_start:        91\n");
+    // printk("[INODE DEBUG] =========================================\n");
+
+    // // ================ 初始化根inode ================
+    // printk("[INODE DEBUG] Initializing root inode...\n");
+    // printk("[INODE DEBUG] ROOT_INODE_NO=%d, num_inodes=%d\n", 
+    //        ROOT_INODE_NO, sblock->num_inodes);
+    
+    if (ROOT_INODE_NO < sblock->num_inodes) {
         inodes.root = inodes.get(ROOT_INODE_NO);
-    else
-        printk("(warn) init_inodes: no root inode.\n");
+        // printk("[INODE DEBUG] Root inode initialized successfully\n");
+    } else {
+        printk("(WARN) init_inodes: No root inode available!\n");
+        // printk("       ROOT_INODE_NO=%d >= num_inodes=%d\n", 
+        //        ROOT_INODE_NO, sblock->num_inodes);
+        inodes.root = NULL;
+    }
+
 }
 
 // initialize in-memory inode.
@@ -120,7 +175,10 @@ static void inode_lock(Inode* inode) {
     // TODO
 
     // 持有 inode 自身的睡眠锁
-    acquire_sleeplock(&inode->lock);
+    int ret = acquire_sleeplock(&inode->lock);
+    if (ret < 0) {
+        PANIC();
+    }
 
     // 如果 inode 无效，需要从磁盘读取 inode_entry
     if (!inode->valid) {
@@ -160,7 +218,7 @@ static void inode_sync(OpContext* ctx, Inode* inode, bool do_write) {
     // 找到对应的 inode entry
     InodeEntry* entry = get_entry(block, inode->inode_no);
 
-        if (do_write) {
+    if (do_write) {
         // 将 inode.entry 写入 block 缓存
         memcpy(entry, &inode->entry, sizeof(InodeEntry));
     } 
@@ -169,7 +227,7 @@ static void inode_sync(OpContext* ctx, Inode* inode, bool do_write) {
         memcpy(&inode->entry, entry, sizeof(InodeEntry));
         inode->valid = true;
     }
-
+    cache->sync(ctx, block);
     cache->release(block);
 
 }
@@ -321,7 +379,7 @@ static void inode_put(OpContext* ctx, Inode* inode) {
     unalertable_wait_sem(&inode->lock);
 
     // 步骤 2：先保存引用计数的旧值
-    usize old_rc = inode->rc.count;
+    // usize old_rc = inode->rc.count;
 
     // 步骤 3：原子减少引用计数
     decrement_rc(&inode->rc);
@@ -414,7 +472,7 @@ static usize inode_map(OpContext* ctx,
         Block* ind_blk = cache->acquire(inode->entry.indirect);
         memset(ind_blk->data, 0, BLOCK_SIZE);
         // 如果不需要同步，可以注释掉下面一行
-        // cache->sync(ctx, ind_blk);
+        cache->sync(ctx, ind_blk);
         cache->release(ind_blk);
     }
 
@@ -428,7 +486,7 @@ static usize inode_map(OpContext* ctx,
         addrs[block_idx] = blk_no;
         if (modified) *modified = true;
         // 需要同步！！！
-        // cache->sync(ctx, ind_blk);
+        cache->sync(ctx, ind_blk);
     }
 
     cache->release(ind_blk);
@@ -439,6 +497,9 @@ static usize inode_map(OpContext* ctx,
 // see `inode.h`.
 static usize inode_read(Inode* inode, u8* dest, usize offset, usize count) {
     InodeEntry* entry = &inode->entry;
+    if (entry->type == INODE_DEVICE) {
+        return console_read(inode, (char *)dest, count);
+    }
     if (count + offset > entry->num_bytes)
         count = entry->num_bytes - offset;
     usize end = offset + count;
@@ -451,7 +512,7 @@ static usize inode_read(Inode* inode, u8* dest, usize offset, usize count) {
 
     while (read_bytes < count) {
         usize file_offset = offset + read_bytes;
-        usize block_idx = file_offset / BLOCK_SIZE;
+        // usize block_idx = file_offset / BLOCK_SIZE;
         usize block_offset = file_offset % BLOCK_SIZE;
         usize remaining = count - read_bytes;
         bool modified = false;
@@ -480,6 +541,9 @@ static usize inode_write(OpContext* ctx,
                          usize offset,
                          usize count) {
     InodeEntry* entry = &inode->entry;
+    if (entry->type == INODE_DEVICE) {
+        return console_write(inode, (char *)src, count);
+    }
     usize end = offset + count;
     ASSERT(offset <= entry->num_bytes);
     ASSERT(end <= INODE_MAX_BYTES);
@@ -490,7 +554,7 @@ static usize inode_write(OpContext* ctx,
 
     while (written < count) {
         usize file_offset = offset + written;
-        usize block_idx = file_offset / BLOCK_SIZE;
+        // usize block_idx = file_offset / BLOCK_SIZE;
         usize block_offset = file_offset % BLOCK_SIZE;
         usize remaining = count - written;
         bool modified = false;
@@ -522,32 +586,25 @@ static usize inode_write(OpContext* ctx,
 }
 
 // see `inode.h`.
-static usize inode_lookup(Inode* inode, const char* name, usize* index) {
-    InodeEntry* entry = &inode->entry;
+static usize inode_lookup(Inode *inode, const char *name, usize *index) {
+    InodeEntry *entry = &inode->entry;
     ASSERT(entry->type == INODE_DIRECTORY);
 
     // TODO
-    usize num_entries = entry->num_bytes / sizeof(DirEntry); // 目录条目数量
-    DirEntry dir_entry;
-
-    for (usize i = 0; i < num_entries; i++) {
-        bool modified = false;
-        usize block_no = inode_map(NULL, inode, i * sizeof(DirEntry), &modified);
-        if (block_no == 0) continue; // 块未分配，跳过
-
-        Block* blk = cache->acquire(block_no);
-        usize offset_in_block = (i * sizeof(DirEntry)) % BLOCK_SIZE;
-
-        memcpy(&dir_entry, blk->data + offset_in_block, sizeof(DirEntry));
-        cache->release(blk);
-
-        if (strcmp(dir_entry.name, name) == 0) {
-            if (index) *index = i;
+    for (usize i = 0; i < entry->num_bytes; i += sizeof(DirEntry)) {
+        DirEntry dir_entry;
+        inode_read(inode, (u8 *)&dir_entry, i, sizeof(DirEntry));
+        // if (strcmp(dir_entry.name, name) == 0) {
+        //     if (index) *index = i;
+        //     return dir_entry.inode_no;
+        // }
+        if (dir_entry.inode_no && !strncmp(name, dir_entry.name, FILE_NAME_MAX_LENGTH)) {
+            if (index)
+                *index = i;
             return dir_entry.inode_no;
         }
     }
-
-    return 0; // 未找到
+    return 0;
 }
 
 // see `inode.h`.
@@ -679,9 +736,63 @@ static Inode* namex(const char* path,
                     char* name,
                     OpContext* ctx) {
     /* (Final) TODO BEGIN */
+
+    //   printk("[NAMEX] entry: path='%s', nameiparent=%d\n", path, nameiparent);
+    // 初始化阶段
+    Inode* current = (*path == '/') ? inode_get(ROOT_INODE_NO) 
+                                    : inode_share(thisproc()->cwd);
+    if (!current) return NULL;
     
+    const char* cursor = path;
+    
+    // 处理每个路径分量
+    while (1) {
+        cursor = skipelem(cursor, name);
+        // printk("[NAMEX] loop: path='%s', name='%s'\n", path, name);
+        if (!cursor) break;
+        
+        inode_lock(current);
+        
+        // 必须是目录
+        if (current->entry.type != INODE_DIRECTORY) {
+            // printk("[NAMEX] ERROR: not a directory (type=%d)\n", ip->entry.type);
+            inode_unlock(current);
+            inode_put(ctx, current);
+            return NULL;
+        }
+        
+        // 父目录请求
+        if (nameiparent && *cursor == '\0') {
+            inode_unlock(current);
+            return current;
+        }
+        
+        // 查找下一级
+        usize next_ino = inode_lookup(current, name, 0);
+        if (next_ino == 0) {
+            inode_unlock(current);
+            inode_put(ctx, current);
+            return NULL;
+        }
+        
+        inode_unlock(current);
+        inode_put(ctx, current);
+        
+        current = inode_get(next_ino);
+        if (!current) return NULL;
+    }
+    
+    // 最终处理
+
+    // printk("[NAMEX] exit: nameiparent=%d\n", nameiparent);
+    if (nameiparent) {
+        inode_put(ctx, current);
+        return NULL;
+    }
+    
+    return current;
     /* (Final) TODO END */
-    return 0;
+    // return 0;
 }
 
 Inode* namei(const char* path, OpContext* ctx) {

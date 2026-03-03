@@ -60,7 +60,25 @@ void syscall_entry(UserContext *context)
  */
 bool user_readable(const void *start, usize size) {
     /* (Final) TODO BEGIN */
-
+    if (size == 0) {
+        return true;  // Empty range is trivially readable
+    }
+    
+    Proc *current_proc = thisproc();
+    u64 start_addr = (u64)start;
+    u64 end_addr = start_addr + size;
+    
+    // Check each memory block in the range
+    for (u64 addr = start_addr; addr < end_addr; addr = ((addr / BLOCK_SIZE) + 1) * BLOCK_SIZE) {
+        PTEntry *pte = get_pte(&current_proc->pgdir, addr, false);
+        
+        // Check if page table entry exists and has user permission
+        if (pte == NULL || (*pte & PTE_USER) == 0) {
+            return false;
+        }
+    }
+    
+    return true;
     /* (Final) TODO END */
 }
 
@@ -71,7 +89,25 @@ bool user_readable(const void *start, usize size) {
  */
 bool user_writeable(const void *start, usize size) {
     /* (Final) TODO Begin */
-
+    if (size == 0) {
+        return true;  // Empty range is trivially writeable
+    }
+    
+    Proc *current_proc = thisproc();
+    u64 start_addr = (u64)start;
+    u64 end_addr = start_addr + size;
+    
+    // Check each memory block in the range
+    for (u64 addr = start_addr; addr < end_addr; addr = ((addr / BLOCK_SIZE) + 1) * BLOCK_SIZE) {
+        PTEntry *pte = get_pte(&current_proc->pgdir, addr, false);
+        
+        // Check if page table entry exists, has user permission, and is not read-only
+        if (pte == NULL || (*pte & PTE_RO) || (*pte & PTE_USER) == 0) {
+            return false;
+        }
+    }
+    
+    return true;
     /* (Final) TODO End */
 }
 

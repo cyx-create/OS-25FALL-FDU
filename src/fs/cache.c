@@ -92,6 +92,7 @@ static INLINE void write_header() {
 
 static Block *find_cached_block(usize block_no) {
     ListNode *p;
+    (void)p;  // 告诉编译器这个变量可能看起来未使用，但实际上在宏中使用(final lab为了不报错硬加的)
     usize count = 0;
     
     _for_in_list(p, &head) {
@@ -174,7 +175,12 @@ static Block *cache_acquire(usize block_no) {
         release_spinlock(&lock);
         
         // 获取块锁
-        acquire_sleeplock(&blk->lock);
+        // acquire_sleeplock(&blk->lock);
+        //final lab为了qemu不报错加的
+        int ret = acquire_sleeplock(&blk->lock);
+        if (ret < 0) {
+            PANIC();
+        }
         
         // 确保数据有效
         if (!blk->valid) {
@@ -211,7 +217,12 @@ static Block *cache_acquire(usize block_no) {
     release_spinlock(&lock);
     
     // 获取锁并读取数据
-    acquire_sleeplock(&blk->lock);
+    // acquire_sleeplock(&blk->lock);
+    //final lab为了qemu不报错加的
+    int ret = acquire_sleeplock(&blk->lock);
+    if (ret < 0) {
+        PANIC();
+    }
     device_read(blk);
     blk->valid = true;
     return blk;
@@ -376,7 +387,10 @@ static void cache_end_op(OpContext *ctx) {
         // 等待当前checkpoint完成
         while (log.checkpointing) {
             release_spinlock(&log.glock);
-            wait_sem(&log.op_sem);
+            int ret = wait_sem(&log.op_sem);
+            if (ret < 0) {
+                PANIC();
+            }
             acquire_spinlock(&log.glock);
         }
         post_sem(&log.op_sem);

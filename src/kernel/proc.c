@@ -226,41 +226,71 @@ NO_RETURN void exit(int code)
     // 3. transfer children to the root_proc, and notify the root_proc if there is zombie
     // 4. sched(ZOMBIE)
     // NOTE: be careful of concurrency
-    auto this = thisproc();
-    this->exitcode = code;
 
-    acquire_spinlock(&plock);
-    acquire_sched_lock();
+    Proc *current_proc = thisproc();
+    ASSERT(current_proc != &root_proc);
+    current_proc->exitcode = code;
 
-    int times = 0;
-    _for_in_list(p, &this->children){
-        if(p == &this->children){
-            continue;
-        }
-        auto child = container_of(p, Proc, ptnode);
-        child->parent = &root_proc;
-        if(child->state == ZOMBIE){
-            times++;
+    // 关闭所有打开的文件
+    for (int file_index = 0; file_index < NOFILE; ++file_index) {
+        if (current_proc->oftable.ofile[file_index]) {
+            file_close(current_proc->oftable.ofile[file_index]);
+            current_proc->oftable.ofile[file_index] = NULL;
         }
     }
 
-    if(!_empty_list(&this->children)){
-        _merge_list(&root_proc.children, this->children.next);
-        _detach_from_list(&this->children);
-        release_sched_lock();
-        for(int i = 0; i < times; i++){
+    // 释放当前工作目录
+    OpContext ctx;
+    bcache.begin_op(&ctx);
+    inodes.put(&ctx, current_proc->cwd);
+    bcache.end_op(&ctx);
+    current_proc->cwd = NULL;
+
+    // 释放内存段
+    free_sections(&current_proc->pgdir);
+
+    // 处理子进程和父进程通知
+    acquire_spinlock(&plock);
+    post_sem(&current_proc->parent->childexit);
+
+    // 统计僵尸子进程数量
+    int zombie_count = 0;
+    ListNode *child_node = current_proc->children.next;
+    while (child_node != &current_proc->children) {
+        Proc *child_proc = container_of(child_node, Proc, ptnode);
+        child_proc->parent = &root_proc;
+        if (child_proc->state == ZOMBIE) {
+            zombie_count++;
+        }
+        child_node = child_node->next;
+    }
+
+    // 转移子进程给根进程
+    if (!_empty_list(&current_proc->children)) {
+        ListNode *first_child = current_proc->children.next;
+        ListNode *last_child = current_proc->children.prev;
+        
+        // 连接到根进程的子进程链表
+        last_child->next = &root_proc.children;
+        first_child->prev = root_proc.children.prev;
+        root_proc.children.prev->next = first_child;
+        root_proc.children.prev = last_child;
+        
+        // 清空当前进程的子进程链表
+        _detach_from_list(&current_proc->children);
+        
+        // 通知根进程有僵尸子进程
+        for (int i = 0; i < zombie_count; i++) {
             post_sem(&root_proc.childexit);
         }
-        acquire_sched_lock();
     }
-    free_pgdir(&this->pgdir);
 
-    release_sched_lock();
-
-    post_sem(&thisproc()->parent->childexit);
-
+    // 获取调度锁并释放页目录
     acquire_sched_lock();
+    free_pgdir(&current_proc->pgdir);
     release_spinlock(&plock);
+
+    // 切换到僵尸状态
     sched(ZOMBIE);
 
     PANIC(); // prevent the warning of 'no_return function returns'
@@ -309,7 +339,7 @@ int kill(int pid)
  * Sets up stack to return as if from system call.
  */
 void trap_return();
-int fork()
+int fork(void)
 {
     /**
      * (Final) TODO BEGIN
@@ -322,6 +352,72 @@ int fork()
      * 6. Activate the new proc and return its pid.
      */
 
+    // 1. Create a new child process
+    Proc *child_proc = create_proc();
+    if (child_proc == NULL) {
+        return -1;
+    }
+    
+    // 2. Get current parent process
+    Proc *parent_proc = thisproc();
+    
+    // 3. Copy parent's memory space with Copy-on-Write
+    acquire_spinlock(&parent_proc->pgdir.lock);
+    
+    // Copy page directory sections with Copy-on-Write
+    ListNode *section_head = &parent_proc->pgdir.section_head;
+    ListNode *current = section_head->next;
+    
+    // 遍历所有 section 节点
+    while (current != section_head) {
+        struct section *st = container_of(current, struct section, stnode);
+        
+        // Apply Copy-on-Write for each page in the section
+        for (u64 va = PAGE_BASE(st->begin); va < st->end; va += PAGE_SIZE) {
+            PTEntriesPtr old_pte = get_pte(&parent_proc->pgdir, va, false);
+            
+            if ((old_pte == NULL) || !(*old_pte & PTE_VALID)) {
+                continue;
+            }
+            
+            // Map the same physical page but mark as read-only for CoW
+            vmmap(&child_proc->pgdir, 
+                  va, 
+                  (void *)P2K(PTE_ADDRESS(*old_pte)), 
+                  PTE_FLAGS(*old_pte) | PTE_RO);
+        }
+        
+        current = current->next;
+    }
+    
+    // Copy section metadata
+    copy_sections(&parent_proc->pgdir.section_head, 
+                  &child_proc->pgdir.section_head);
+    
+    release_spinlock(&parent_proc->pgdir.lock);
+    
+    // 4. Copy parent's trapframe/context
+    memcpy(child_proc->ucontext, parent_proc->ucontext, sizeof(*child_proc->ucontext));
+    
+    // Fork returns 0 in the child process
+    child_proc->ucontext->x[0] = 0;
+    
+    // 5. Set parent relationship
+    set_parent_to_this(child_proc);
+    
+    // 6. Copy file descriptors
+    for (usize i = 0; i < NOFILE; i++) {
+        if (parent_proc->oftable.ofile[i]) {
+            child_proc->oftable.ofile[i] = file_dup(parent_proc->oftable.ofile[i]);
+        }
+    }
+    
+    // 7. Copy current working directory
+    child_proc->cwd = inodes.share(parent_proc->cwd);
+    
+    // 8. Start the child process and return its PID
+    return start_proc(child_proc, trap_return, 0);
+    
     /* (Final) TODO END */
 }
 

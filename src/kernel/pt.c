@@ -74,6 +74,10 @@ PTEntriesPtr get_pte(struct pgdir *pgdir, u64 va, bool alloc)
 void init_pgdir(struct pgdir *pgdir)
 {
     pgdir->pt = NULL;
+
+    //final lab
+    init_spinlock(&pgdir->lock);
+    init_list_node(&pgdir->section_head);
 }
 
 void free_pgdir(struct pgdir *pgdir)
@@ -123,10 +127,30 @@ void attach_pgdir(struct pgdir *pgdir)
  * address 'ka' in page directory 'pd', 'flags' is the flags for the page
  * table entry.
  */
+extern RefCount page_ref[PHYSTOP / PAGE_SIZE];
+extern u64 memory_start;
+
+// 如果需要，可以在这里定义辅助函数
+static u64 get_page_idx(void *p) {
+    return ((u64)p - memory_start) / PAGE_SIZE;
+}
+
+
 void vmmap(struct pgdir *pd, u64 va, void *ka, u64 flags)
 {
     /* (Final) TODO BEGIN */
+    PTEntry *pte = get_pte(pd, va, true);
+    
+    if (pte == NULL) {
+        return;
+    }
 
+    *pte = K2P(ka) | flags;
+
+    // 增加新页面的引用计数
+    u64 page_idx = get_page_idx(ka);
+    increment_rc(&page_ref[page_idx]);
+    
     /* (Final) TODO END */
 }
 
@@ -138,6 +162,34 @@ void vmmap(struct pgdir *pd, u64 va, void *ka, u64 flags)
 int copyout(struct pgdir *pd, void *va, void *p, usize len)
 {
     /* (Final) TODO BEGIN */
+    if (((usize)va + len) & KSPACE_MASK)
+        return -1;
 
+    for (usize n; len; len -= n, va += n) {
+        u64 *pte;
+        if ((pte = get_pte(pd, (u64)va, 1)) == NULL)
+            return -1;
+        void *page;
+        if (*pte & PTE_VALID) {
+            page = (void *)P2K(PTE_ADDRESS(*pte));
+        } else {
+            if ((page = kalloc_page()) == NULL)
+                return -1;
+            *pte = K2P(page) | PTE_USER_DATA;
+            
+            // 注意：kalloc_page() 已经设置了引用计数为1
+            // 这里建立映射，需要再增加一次引用计数
+            u64 page_idx = get_page_idx(page);
+            increment_rc(&page_ref[page_idx]);
+        }
+        usize pgoff = (usize)va % PAGE_SIZE;
+        n = MIN(PAGE_SIZE - pgoff, len);
+        if (p) {
+            memcpy(page + pgoff, p, n);
+            p += n;
+        } else
+            memset(page + pgoff, 0, n);
+    }
+    return 0;
     /* (Final) TODO END */
 }
